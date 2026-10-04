@@ -1,0 +1,25 @@
+[
+  {
+    "name": "Red rice with dhal curry and greens",
+    "mealType": "lunch",
+    "description": "Fill with reviewed per-serving recipe information",
+    "servings": 1,
+    "ingredients": [{ "name": "Replace with a measured ingredient", "quantity": null, "unit": "g" }],
+    "instructions": ["Replace with the actual preparation steps"],
+    "calories": null,
+    "protein": null,
+    "carbs": null,
+    "fat": null,
+    "estimatedCostLkr": null,
+    "prepTimeMinutes": null,
+    "allergens": [],
+    "dietTags": [],
+    "reason": "Locally available meal for a workout routine",
+    "cuisineType": "Sri Lankan",
+    "priceObservedOn": "YYYY-MM-DD",
+    "nutritionVerificationStatus": "unverified",
+    "nutritionSource": null,
+    "nutritionSourceReference": null,
+    "reviewedByCurator": false
+  }
+]

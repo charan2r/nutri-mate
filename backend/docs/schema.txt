@@ -1,0 +1,985 @@
+-- ============================================================
+-- KEMA MATE AI — UPDATED MVP SCHEMA
+-- PostgreSQL
+-- ============================================================
+
+CREATE SCHEMA IF NOT EXISTS "public";
+
+-- Use gen_random_uuid().
+-- If you prefer uuid-ossp, replace this with uuid-ossp and uuid_generate_v4().
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+
+-- ============================================================
+-- 1. USERS
+-- Authentication/account information only
+-- ============================================================
+
+CREATE TABLE "users" (
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+
+    "email" varchar(255) NOT NULL,
+    "passwordHash" varchar NOT NULL,
+
+    "createdAt" timestamptz NOT NULL DEFAULT now(),
+    "updatedAt" timestamptz NOT NULL DEFAULT now(),
+
+    CONSTRAINT "PK_users"
+        PRIMARY KEY ("id"),
+
+    CONSTRAINT "CHK_users_email"
+        CHECK (trim("email") <> ''),
+
+    CONSTRAINT "CHK_users_password_hash"
+        CHECK (trim("passwordHash") <> '')
+);
+
+-- Case-insensitive unique email
+CREATE UNIQUE INDEX "UQ_users_email_lower"
+    ON "users" (lower("email"));
+
+
+-- ============================================================
+-- 2. USER PROFILES
+-- Physical/profile information used for nutrition calculations
+-- ============================================================
+
+CREATE TABLE "user_profiles" (
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "userId" uuid NOT NULL,
+
+    "dateOfBirth" date NOT NULL,
+    "biologicalSex" varchar(20) NOT NULL,
+
+    "heightCm" numeric(6,2) NOT NULL,
+    "weightKg" numeric(6,2) NOT NULL,
+    "targetWeightKg" numeric(6,2),
+
+    "goal" varchar(50) NOT NULL,
+    -- lose_weight | maintain | gain_weight
+
+    "activityLevel" varchar(50) NOT NULL,
+    -- sedentary | moderately_active | very_active
+
+    "createdAt" timestamptz NOT NULL DEFAULT now(),
+    "updatedAt" timestamptz NOT NULL DEFAULT now(),
+
+    CONSTRAINT "PK_user_profiles"
+        PRIMARY KEY ("id"),
+
+    CONSTRAINT "UQ_user_profiles_user"
+        UNIQUE ("userId"),
+
+    CONSTRAINT "FK_user_profiles_user"
+        FOREIGN KEY ("userId")
+        REFERENCES "users"("id")
+        ON DELETE CASCADE,
+
+    CONSTRAINT "CHK_user_profiles_height"
+        CHECK ("heightCm" > 0),
+
+    CONSTRAINT "CHK_user_profiles_weight"
+        CHECK ("weightKg" > 0),
+
+    CONSTRAINT "CHK_user_profiles_target_weight"
+        CHECK (
+            "targetWeightKg" IS NULL
+            OR "targetWeightKg" > 0
+        ),
+
+    CONSTRAINT "CHK_user_profiles_biological_sex"
+        CHECK (
+            "biologicalSex" IN (
+                'male',
+                'female',
+                'prefer_not_to_say'
+            )
+        ),
+
+    CONSTRAINT "CHK_user_profiles_goal"
+        CHECK (
+            "goal" IN (
+                'lose_weight',
+                'maintain',
+                'gain_weight'
+            )
+        ),
+
+    CONSTRAINT "CHK_user_profiles_activity_level"
+        CHECK (
+            "activityLevel" IN (
+                'sedentary',
+                'moderately_active',
+                'very_active'
+            )
+        )
+);
+
+
+-- ============================================================
+-- 3. USER PREFERENCES
+-- Diet, budget, cooking and food preferences
+-- ============================================================
+
+CREATE TABLE "user_preferences" (
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "userId" uuid NOT NULL,
+
+    -- Calculated by backend, not AI
+    "dailyCalorieTarget" integer NOT NULL,
+
+    "dietType" varchar(50) NOT NULL DEFAULT 'non-veg',
+    -- non-veg | vegetarian | vegan | other
+
+    "appetiteLevel" varchar(30) NOT NULL DEFAULT 'medium',
+    -- low | medium | high
+
+    "mealsPerDay" smallint NOT NULL DEFAULT 3,
+
+    "dailyBudget" numeric(10,2),
+
+    "preferredCuisines" text[] NOT NULL DEFAULT '{}',
+    "excludedIngredients" text[] NOT NULL DEFAULT '{}',
+    "dislikedFoods" text[] NOT NULL DEFAULT '{}',
+
+    "maximumPrepMinutes" smallint,
+
+    "cookingSkill" varchar(30),
+    -- beginner | intermediate | advanced
+
+    "servings" smallint NOT NULL DEFAULT 1,
+
+    "preferredLanguage" varchar(10) NOT NULL DEFAULT 'en',
+
+    "createdAt" timestamptz NOT NULL DEFAULT now(),
+    "updatedAt" timestamptz NOT NULL DEFAULT now(),
+
+    CONSTRAINT "PK_user_preferences"
+        PRIMARY KEY ("id"),
+
+    CONSTRAINT "UQ_user_preferences_user"
+        UNIQUE ("userId"),
+
+    CONSTRAINT "FK_user_preferences_user"
+        FOREIGN KEY ("userId")
+        REFERENCES "users"("id")
+        ON DELETE CASCADE,
+
+    CONSTRAINT "CHK_user_preferences_calories"
+        CHECK ("dailyCalorieTarget" > 0),
+
+    CONSTRAINT "CHK_user_preferences_meals"
+        CHECK ("mealsPerDay" BETWEEN 1 AND 6),
+
+    CONSTRAINT "CHK_user_preferences_budget"
+        CHECK (
+            "dailyBudget" IS NULL
+            OR "dailyBudget" >= 0
+        ),
+
+    CONSTRAINT "CHK_user_preferences_prep_time"
+        CHECK (
+            "maximumPrepMinutes" IS NULL
+            OR "maximumPrepMinutes" > 0
+        ),
+
+    CONSTRAINT "CHK_user_preferences_servings"
+        CHECK ("servings" > 0),
+
+    CONSTRAINT "CHK_user_preferences_diet_type"
+        CHECK (
+            "dietType" IN (
+                'non-veg',
+                'vegetarian',
+                'vegan',
+                'other'
+            )
+        ),
+
+    CONSTRAINT "CHK_user_preferences_appetite_level"
+        CHECK (
+            "appetiteLevel" IN (
+                'low',
+                'medium',
+                'high'
+            )
+        ),
+
+    CONSTRAINT "CHK_user_preferences_cooking_skill"
+        CHECK (
+            "cookingSkill" IS NULL
+            OR "cookingSkill" IN (
+                'beginner',
+                'intermediate',
+                'advanced'
+            )
+        ),
+
+    CONSTRAINT "CHK_user_preferences_language"
+        CHECK (trim("preferredLanguage") <> '')
+);
+
+
+-- ============================================================
+-- 4. ALLERGIES
+-- Kept separate because allergy data is safety-critical
+-- ============================================================
+
+CREATE TABLE "allergies" (
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "userId" uuid NOT NULL,
+
+    "allergen" varchar(100) NOT NULL,
+
+    "createdAt" timestamptz NOT NULL DEFAULT now(),
+
+    CONSTRAINT "PK_allergies"
+        PRIMARY KEY ("id"),
+
+    CONSTRAINT "FK_allergies_user"
+        FOREIGN KEY ("userId")
+        REFERENCES "users"("id")
+        ON DELETE CASCADE,
+
+    CONSTRAINT "CHK_allergies_allergen"
+        CHECK (trim("allergen") <> '')
+);
+
+-- Normalized allergy uniqueness.
+-- Prevents duplicates like Peanut, peanut, PEANUT.
+CREATE UNIQUE INDEX "UQ_allergies_user_allergen_normalized"
+    ON "allergies" ("userId", lower(trim("allergen")));
+
+-- Helpful for fetching a user's allergies
+CREATE INDEX "IDX_allergies_user"
+    ON "allergies" ("userId");
+
+
+-- ============================================================
+-- 5. MEAL PLAN REQUESTS
+-- Stores the exact inputs used to generate a plan
+-- ============================================================
+
+CREATE TABLE "meal_plan_requests" (
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "userId" uuid NOT NULL,
+
+    "startDate" date NOT NULL,
+
+    "durationDays" smallint NOT NULL DEFAULT 7,
+
+    -- Normally derived from user preferences/backend calculation.
+    "targetCalories" integer,
+
+    "targetMacros" jsonb,
+    -- Example:
+    -- {
+    --   "protein": 120,
+    --   "carbs": 220,
+    --   "fat": 65
+    -- }
+
+    -- Snapshot of profile/preferences/allergies at generation time.
+    "inputSnapshot" jsonb NOT NULL,
+
+    -- SHA-256 hash of normalized request inputs.
+    -- Used for caching/idempotency/similar request detection.
+    "requestHash" varchar(64),
+
+    -- Explicitly marks whether unverified meals must be excluded.
+    "strictCalorieControl" boolean NOT NULL DEFAULT false,
+
+    "createdAt" timestamptz NOT NULL DEFAULT now(),
+
+    CONSTRAINT "PK_meal_plan_requests"
+        PRIMARY KEY ("id"),
+
+    CONSTRAINT "FK_meal_plan_requests_user"
+        FOREIGN KEY ("userId")
+        REFERENCES "users"("id")
+        ON DELETE CASCADE,
+
+    CONSTRAINT "CHK_meal_plan_requests_duration"
+        CHECK ("durationDays" BETWEEN 1 AND 31),
+
+    CONSTRAINT "CHK_meal_plan_requests_calories"
+        CHECK (
+            "targetCalories" IS NULL
+            OR "targetCalories" > 0
+        ),
+
+    CONSTRAINT "CHK_meal_plan_requests_request_hash"
+        CHECK (
+            "requestHash" IS NULL
+            OR length("requestHash") = 64
+        ),
+
+    CONSTRAINT "CHK_meal_plan_requests_target_macros_object"
+        CHECK (
+            "targetMacros" IS NULL
+            OR jsonb_typeof("targetMacros") = 'object'
+        ),
+
+    CONSTRAINT "CHK_meal_plan_requests_input_snapshot_object"
+        CHECK (jsonb_typeof("inputSnapshot") = 'object')
+);
+
+
+-- ============================================================
+-- 6. MEAL PLANS
+-- Stores generated plan, validation results and quality score
+-- ============================================================
+
+CREATE TABLE "meal_plans" (
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+
+    "userId" uuid NOT NULL,
+    "requestId" uuid NOT NULL,
+
+    "startDate" date NOT NULL,
+    "endDate" date NOT NULL,
+
+    "status" varchar(30) NOT NULL DEFAULT 'pending',
+    -- pending
+    -- generating
+    -- validating
+    -- validated
+    -- failed
+
+    "generationMethod" varchar(30) NOT NULL DEFAULT 'ai',
+    -- ai
+    -- database_fallback
+    -- hybrid
+
+    -- AI traceability
+    "provider" varchar(50),
+    "modelUsed" varchar(100),
+    "promptVersion" varchar(50),
+
+    -- Validation results
+    "validationSummary" jsonb,
+    -- Example:
+    -- {
+    --   "allergySafe": true,
+    --   "calorieTargetMet": true,
+    --   "budgetMet": true,
+    --   "nutritionVerified": true
+    -- }
+
+    -- Deterministic quality score
+    "qualityScore" numeric(5,2),
+
+    "scoreBreakdown" jsonb,
+    -- Example:
+    -- {
+    --   "nutrition": 90,
+    --   "constraints": 100,
+    --   "preferences": 85,
+    --   "budget": 90,
+    --   "diversity": 80
+    -- }
+
+    "scoreVersion" varchar(30),
+
+    -- Plan totals
+    "totalCalories" numeric(12,2),
+    "totalProtein" numeric(12,2),
+    "totalCarbs" numeric(12,2),
+    "totalFat" numeric(12,2),
+
+    "estimatedCostLkr" numeric(12,2),
+
+    "generationMeta" jsonb,
+    -- Lightweight AI telemetry
+    -- Example:
+    -- {
+    --   "retryCount": 0,
+    --   "inputTokens": 2000,
+    --   "outputTokens": 3500,
+    --   "generationLatencyMs": 4200
+    -- }
+
+    "createdAt" timestamptz NOT NULL DEFAULT now(),
+    "updatedAt" timestamptz NOT NULL DEFAULT now(),
+
+    CONSTRAINT "PK_meal_plans"
+        PRIMARY KEY ("id"),
+
+    CONSTRAINT "FK_meal_plans_user"
+        FOREIGN KEY ("userId")
+        REFERENCES "users"("id")
+        ON DELETE CASCADE,
+
+    CONSTRAINT "FK_meal_plans_request"
+        FOREIGN KEY ("requestId")
+        REFERENCES "meal_plan_requests"("id")
+        ON DELETE CASCADE,
+
+    -- One generated plan for one request in MVP.
+    -- If you later support multiple attempts per request,
+    -- replace this with attempt-based uniqueness.
+    CONSTRAINT "UQ_meal_plans_request"
+        UNIQUE ("requestId"),
+
+    CONSTRAINT "CHK_meal_plans_dates"
+        CHECK ("endDate" >= "startDate"),
+
+    CONSTRAINT "CHK_meal_plans_status"
+        CHECK (
+            "status" IN (
+                'pending',
+                'generating',
+                'validating',
+                'validated',
+                'failed'
+            )
+        ),
+
+    CONSTRAINT "CHK_meal_plans_generation_method"
+        CHECK (
+            "generationMethod" IN (
+                'ai',
+                'database_fallback',
+                'hybrid'
+            )
+        ),
+
+    CONSTRAINT "CHK_meal_plans_quality_score"
+        CHECK (
+            "qualityScore" IS NULL
+            OR "qualityScore" BETWEEN 0 AND 100
+        ),
+
+    CONSTRAINT "CHK_meal_plans_total_calories"
+        CHECK (
+            "totalCalories" IS NULL
+            OR "totalCalories" >= 0
+        ),
+
+    CONSTRAINT "CHK_meal_plans_total_protein"
+        CHECK (
+            "totalProtein" IS NULL
+            OR "totalProtein" >= 0
+        ),
+
+    CONSTRAINT "CHK_meal_plans_total_carbs"
+        CHECK (
+            "totalCarbs" IS NULL
+            OR "totalCarbs" >= 0
+        ),
+
+    CONSTRAINT "CHK_meal_plans_total_fat"
+        CHECK (
+            "totalFat" IS NULL
+            OR "totalFat" >= 0
+        ),
+
+    CONSTRAINT "CHK_meal_plans_estimated_cost"
+        CHECK (
+            "estimatedCostLkr" IS NULL
+            OR "estimatedCostLkr" >= 0
+        ),
+
+    CONSTRAINT "CHK_meal_plans_validation_summary_object"
+        CHECK (
+            "validationSummary" IS NULL
+            OR jsonb_typeof("validationSummary") = 'object'
+        ),
+
+    CONSTRAINT "CHK_meal_plans_score_breakdown_object"
+        CHECK (
+            "scoreBreakdown" IS NULL
+            OR jsonb_typeof("scoreBreakdown") = 'object'
+        ),
+
+    CONSTRAINT "CHK_meal_plans_generation_meta_object"
+        CHECK (
+            "generationMeta" IS NULL
+            OR jsonb_typeof("generationMeta") = 'object'
+        )
+);
+
+
+-- ============================================================
+-- 7. MEALS
+-- Reusable trusted/generated meal knowledge base
+-- ============================================================
+
+CREATE TABLE "meals" (
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+
+    "name" varchar(255) NOT NULL,
+
+    "mealType" varchar(30) NOT NULL,
+    -- breakfast | lunch | dinner | snack
+
+    "description" text NOT NULL DEFAULT '',
+
+    "recipe" text NOT NULL DEFAULT '',
+
+    -- Structured because quantities are required for
+    -- nutrition calculation and grocery list generation.
+    --
+    -- Example:
+    -- [
+    --   {
+    --     "name": "red rice",
+    --     "quantity": 150,
+    --     "unit": "g"
+    --   },
+    --   {
+    --     "name": "chicken",
+    --     "quantity": 100,
+    --     "unit": "g"
+    --   }
+    -- ]
+    "ingredients" jsonb NOT NULL DEFAULT '[]',
+
+    "allergens" text[] NOT NULL DEFAULT '{}',
+
+    "dietTags" text[] NOT NULL DEFAULT '{}',
+    -- vegetarian | vegan | halal | dairy_free etc.
+
+    "cuisineType" varchar(100),
+
+    -- Nutrition per declared serving
+    "calories" numeric(10,2) NOT NULL,
+    "protein" numeric(10,2) NOT NULL,
+    "carbs" numeric(10,2) NOT NULL,
+    "fat" numeric(10,2) NOT NULL,
+
+    "servingSize" numeric(10,2),
+    "servingUnit" varchar(50),
+
+    "prepTimeMinutes" smallint,
+
+    "estimatedCostLkr" numeric(10,2),
+
+    "sourceType" varchar(30) NOT NULL DEFAULT 'curated',
+    -- curated
+    -- ai_generated
+    -- imported
+
+    "nutritionVerificationStatus"
+        varchar(30) NOT NULL DEFAULT 'unverified',
+    -- unverified
+    -- partially_verified
+    -- verified
+    -- rejected
+
+    "nutritionSource" varchar(255),
+    "nutritionSourceReference" text,
+
+    "verifiedAt" timestamptz,
+
+    "isActive" boolean NOT NULL DEFAULT true,
+
+    "createdAt" timestamptz NOT NULL DEFAULT now(),
+    "updatedAt" timestamptz NOT NULL DEFAULT now(),
+
+    CONSTRAINT "PK_meals"
+        PRIMARY KEY ("id"),
+
+    CONSTRAINT "CHK_meals_name"
+        CHECK (trim("name") <> ''),
+
+    CONSTRAINT "CHK_meals_meal_type"
+        CHECK (
+            "mealType" IN (
+                'breakfast',
+                'lunch',
+                'dinner',
+                'snack'
+            )
+        ),
+
+    CONSTRAINT "CHK_meals_source_type"
+        CHECK (
+            "sourceType" IN (
+                'curated',
+                'ai_generated',
+                'imported'
+            )
+        ),
+
+    CONSTRAINT "CHK_meals_verification_status"
+        CHECK (
+            "nutritionVerificationStatus" IN (
+                'unverified',
+                'partially_verified',
+                'verified',
+                'rejected'
+            )
+        ),
+
+    CONSTRAINT "CHK_meals_calories"
+        CHECK ("calories" >= 0),
+
+    CONSTRAINT "CHK_meals_protein"
+        CHECK ("protein" >= 0),
+
+    CONSTRAINT "CHK_meals_carbs"
+        CHECK ("carbs" >= 0),
+
+    CONSTRAINT "CHK_meals_fat"
+        CHECK ("fat" >= 0),
+
+    CONSTRAINT "CHK_meals_cost"
+        CHECK (
+            "estimatedCostLkr" IS NULL
+            OR "estimatedCostLkr" >= 0
+        ),
+
+    CONSTRAINT "CHK_meals_prep_time"
+        CHECK (
+            "prepTimeMinutes" IS NULL
+            OR "prepTimeMinutes" > 0
+        ),
+
+    CONSTRAINT "CHK_meals_serving_size"
+        CHECK (
+            "servingSize" IS NULL
+            OR "servingSize" > 0
+        ),
+
+    CONSTRAINT "CHK_meals_ingredients_array"
+        CHECK (jsonb_typeof("ingredients") = 'array')
+);
+
+
+-- ============================================================
+-- 8. MEAL ITEMS
+-- Individual breakfast/lunch/dinner/snack entries in a plan
+-- ============================================================
+
+CREATE TABLE "meal_items" (
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+
+    "mealPlanId" uuid NOT NULL,
+
+    -- Day number within plan: 1, 2, 3...
+    "day" smallint NOT NULL,
+
+    "mealType" varchar(30) NOT NULL,
+
+    -- Used when meal already exists in trusted DB
+    "mealId" uuid,
+
+    -- Used if this item replaces another meal item.
+    -- The original item should usually have status = 'replaced'.
+    "replacesMealItemId" uuid,
+
+    -- Used if AI generated a novel meal for this plan.
+    -- Stores the original proposed meal before/while verification.
+    "generatedMealSnapshot" jsonb,
+
+    "servings" numeric(5,2) NOT NULL DEFAULT 1,
+
+    -- Snapshot values protect historical plans if a reusable meal
+    -- is changed later.
+    --
+    -- Recommended convention:
+    -- store these as per-serving values.
+    -- Plan totals should be snapshot × servings.
+    "caloriesSnapshot" numeric(10,2),
+    "proteinSnapshot" numeric(10,2),
+    "carbsSnapshot" numeric(10,2),
+    "fatSnapshot" numeric(10,2),
+
+    "estimatedCostSnapshot" numeric(10,2),
+
+    "nutritionVerificationStatus"
+        varchar(30) NOT NULL DEFAULT 'unverified',
+
+    "nutritionSource" varchar(255),
+
+    "selectionExplanation" jsonb,
+    -- Example:
+    -- {
+    --   "allergySafe": true,
+    --   "withinBudget": true,
+    --   "matchesCuisine": true,
+    --   "reason": "..."
+    -- }
+
+    "status" varchar(30) NOT NULL DEFAULT 'scheduled',
+    -- scheduled | completed | skipped | replaced
+
+    "consumedServings" numeric(5,2),
+
+    "createdAt" timestamptz NOT NULL DEFAULT now(),
+    "updatedAt" timestamptz NOT NULL DEFAULT now(),
+
+    CONSTRAINT "PK_meal_items"
+        PRIMARY KEY ("id"),
+
+    CONSTRAINT "FK_meal_items_plan"
+        FOREIGN KEY ("mealPlanId")
+        REFERENCES "meal_plans"("id")
+        ON DELETE CASCADE,
+
+    -- Do not hard-delete meals that are referenced by plan history.
+    -- Use meals.isActive = false instead.
+    CONSTRAINT "FK_meal_items_meal"
+        FOREIGN KEY ("mealId")
+        REFERENCES "meals"("id")
+        ON DELETE RESTRICT,
+
+    CONSTRAINT "FK_meal_items_replaces_meal_item"
+        FOREIGN KEY ("replacesMealItemId")
+        REFERENCES "meal_items"("id")
+        ON DELETE SET NULL,
+
+    -- Must have a DB meal or an AI-generated snapshot.
+    CONSTRAINT "CHK_meal_items_source"
+        CHECK (
+            "mealId" IS NOT NULL
+            OR "generatedMealSnapshot" IS NOT NULL
+        ),
+
+    CONSTRAINT "CHK_meal_items_day"
+        CHECK ("day" > 0),
+
+    CONSTRAINT "CHK_meal_items_servings"
+        CHECK ("servings" > 0),
+
+    CONSTRAINT "CHK_meal_items_meal_type"
+        CHECK (
+            "mealType" IN (
+                'breakfast',
+                'lunch',
+                'dinner',
+                'snack'
+            )
+        ),
+
+    CONSTRAINT "CHK_meal_items_verification_status"
+        CHECK (
+            "nutritionVerificationStatus" IN (
+                'unverified',
+                'partially_verified',
+                'verified',
+                'rejected'
+            )
+        ),
+
+    CONSTRAINT "CHK_meal_items_status"
+        CHECK (
+            "status" IN (
+                'scheduled',
+                'completed',
+                'skipped',
+                'replaced'
+            )
+        ),
+
+    CONSTRAINT "CHK_meal_items_consumed_servings"
+        CHECK (
+            "consumedServings" IS NULL
+            OR "consumedServings" >= 0
+        ),
+
+    CONSTRAINT "CHK_meal_items_replacement"
+        CHECK (
+            "replacesMealItemId" IS NULL
+            OR "replacesMealItemId" <> "id"
+        ),
+
+    CONSTRAINT "CHK_meal_items_generated_snapshot_object"
+        CHECK (
+            "generatedMealSnapshot" IS NULL
+            OR jsonb_typeof("generatedMealSnapshot") = 'object'
+        ),
+
+    CONSTRAINT "CHK_meal_items_selection_explanation_object"
+        CHECK (
+            "selectionExplanation" IS NULL
+            OR jsonb_typeof("selectionExplanation") = 'object'
+        )
+);
+
+-- Only one active meal item per plan/day/mealType.
+-- Replaced items remain for history and feedback.
+CREATE UNIQUE INDEX "UQ_meal_items_active_slot"
+    ON "meal_items" ("mealPlanId", "day", "mealType")
+    WHERE "status" <> 'replaced';
+
+
+-- ============================================================
+-- 9. FEEDBACK
+-- User feedback belongs to the exact meal item shown in the plan
+-- ============================================================
+
+CREATE TABLE "feedback" (
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+
+    "userId" uuid NOT NULL,
+    "mealItemId" uuid NOT NULL,
+
+    "liked" boolean,
+
+    "rating" smallint,
+
+    "comment" text,
+
+    "reasonTags" text[] NOT NULL DEFAULT '{}',
+    -- too_spicy
+    -- too_expensive
+    -- hard_to_prepare
+    -- unavailable_ingredients
+    -- portion_too_small
+    -- portion_too_large
+    -- disliked_taste
+
+    "createdAt" timestamptz NOT NULL DEFAULT now(),
+    "updatedAt" timestamptz NOT NULL DEFAULT now(),
+
+    CONSTRAINT "PK_feedback"
+        PRIMARY KEY ("id"),
+
+    CONSTRAINT "FK_feedback_user"
+        FOREIGN KEY ("userId")
+        REFERENCES "users"("id")
+        ON DELETE CASCADE,
+
+    CONSTRAINT "FK_feedback_meal_item"
+        FOREIGN KEY ("mealItemId")
+        REFERENCES "meal_items"("id")
+        ON DELETE CASCADE,
+
+    -- One feedback record per user per meal item.
+    -- User can update the existing feedback.
+    CONSTRAINT "UQ_feedback_user_meal_item"
+        UNIQUE ("userId", "mealItemId"),
+
+    CONSTRAINT "CHK_feedback_rating"
+        CHECK (
+            "rating" IS NULL
+            OR "rating" BETWEEN 1 AND 5
+        )
+);
+
+
+-- ============================================================
+-- 10. GROCERY LISTS
+-- Grocery items stored directly as JSONB for MVP.
+-- ============================================================
+
+CREATE TABLE "grocery_lists" (
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+
+    "mealPlanId" uuid NOT NULL,
+
+    "items" jsonb NOT NULL DEFAULT '[]',
+    -- Example:
+    --
+    -- [
+    --   {
+    --     "ingredientName": "Red rice",
+    --     "quantity": 1,
+    --     "unit": "kg",
+    --     "category": "Grains",
+    --     "estimatedCostLkr": 450,
+    --     "purchased": false
+    --   },
+    --   {
+    --     "ingredientName": "Chicken",
+    --     "quantity": 500,
+    --     "unit": "g",
+    --     "category": "Protein",
+    --     "estimatedCostLkr": 900,
+    --     "purchased": false
+    --   }
+    -- ]
+
+    "estimatedTotalCostLkr" numeric(12,2),
+
+    "createdAt" timestamptz NOT NULL DEFAULT now(),
+    "updatedAt" timestamptz NOT NULL DEFAULT now(),
+
+    CONSTRAINT "PK_grocery_lists"
+        PRIMARY KEY ("id"),
+
+    CONSTRAINT "UQ_grocery_lists_plan"
+        UNIQUE ("mealPlanId"),
+
+    CONSTRAINT "FK_grocery_lists_plan"
+        FOREIGN KEY ("mealPlanId")
+        REFERENCES "meal_plans"("id")
+        ON DELETE CASCADE,
+
+    CONSTRAINT "CHK_grocery_lists_cost"
+        CHECK (
+            "estimatedTotalCostLkr" IS NULL
+            OR "estimatedTotalCostLkr" >= 0
+        ),
+
+    CONSTRAINT "CHK_grocery_lists_items_array"
+        CHECK (jsonb_typeof("items") = 'array')
+);
+
+
+-- ============================================================
+-- INDEXES
+-- ============================================================
+
+
+-- Useful when listing plans newest first
+CREATE INDEX "IDX_meal_plans_user_created"
+    ON "meal_plans" ("userId", "createdAt" DESC);
+
+-- Find requests belonging to user
+CREATE INDEX "IDX_meal_plan_requests_user"
+    ON "meal_plan_requests" ("userId");
+
+-- Cache lookup by normalized request hash
+CREATE INDEX "IDX_meal_plan_requests_hash"
+    ON "meal_plan_requests" ("requestHash", "createdAt" DESC);
+
+-- Fetch all meals belonging to a plan
+CREATE INDEX "IDX_meal_items_plan"
+    ON "meal_items" ("mealPlanId");
+
+-- Useful when checking where a reusable meal is used
+CREATE INDEX "IDX_meal_items_meal"
+    ON "meal_items" ("mealId");
+
+-- Useful for replacement history/analytics
+CREATE INDEX "IDX_meal_items_replaces"
+    ON "meal_items" ("replacesMealItemId");
+
+-- Useful for active plan calculations
+CREATE INDEX "IDX_meal_items_plan_status"
+    ON "meal_items" ("mealPlanId", "status");
+
+-- Retrieve/filter reusable verified meals
+CREATE INDEX "IDX_meals_verification"
+    ON "meals" (
+        "nutritionVerificationStatus",
+        "isActive"
+    );
+
+-- Common lookup when filtering meal candidates
+CREATE INDEX "IDX_meals_type_verification"
+    ON "meals" (
+        "mealType",
+        "nutritionVerificationStatus"
+    );
+
+-- Useful for allergy-safe meal filtering
+CREATE INDEX "IDX_meals_allergens_gin"
+    ON "meals"
+    USING GIN ("allergens");
+
+-- Useful for diet tag filtering
+CREATE INDEX "IDX_meals_diet_tags_gin"
+    ON "meals"
+    USING GIN ("dietTags");
+
+-- Feedback/history for a user
+CREATE INDEX "IDX_feedback_user"
+    ON "feedback" ("userId");
+
+-- Feedback for a specific meal item
+CREATE INDEX "IDX_feedback_meal_item"
+    ON "feedback" ("mealItemId");
